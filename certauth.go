@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+
+	"github.com/julienschmidt/httprouter"
 )
 
 // TODO:(jnelson) Maybe a standardValidation method for our stuff? Thu May 14 18:41:41 2015
@@ -34,6 +36,7 @@ type Options struct {
 	AuthErrorHandler http.HandlerFunc
 }
 
+// Auth is an instance of the middleware
 type Auth struct {
 	opt            Options
 	authErrHandler http.Handler
@@ -74,6 +77,22 @@ func (a *Auth) Handler(h http.Handler) http.Handler {
 		}
 
 		h.ServeHTTP(w, r)
+	})
+}
+
+// RouterHandler implements the httprouter.Handle for integration with github.com/julienschmidt/httprouter
+func (a *Auth) RouterHandler(h httprouter.Handle) httprouter.Handle {
+	return httprouter.Handle(func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+		// Let secure process the request. If it returns an error,
+		// that indicates the request should not continue.
+		err := a.Process(w, r)
+
+		// If there was an error, do not continue.
+		if err != nil {
+			return
+		}
+
+		h(w, r, ps)
 	})
 }
 
@@ -139,5 +158,5 @@ func (a *Auth) ValidateOU(verifiedChains [][]*x509.Certificate) error {
 			}
 		}
 	}
-	return fmt.Errorf("cert failed OU validation for %v, Allowed: %v", failed, a.opt.AllowedCNs)
+	return fmt.Errorf("cert failed OU validation for %v, Allowed: %v", failed, a.opt.AllowedOUs)
 }

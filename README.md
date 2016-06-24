@@ -11,9 +11,7 @@ routers.
 Usage
 -----
 
-```
-TODO: example
-```
+Examples of usage with various http router libs in the `./examples` directory.
 
 Contributing
 ------------
@@ -29,6 +27,8 @@ writing middleware helped us figure out our approach to creating this project.
 TODO
 ----
 
--	add middleware as well
--	add testing
--   add helper for compatibility with negroni (example: https://github.com/unrolled/secure/blob/v1/secure.go#L110-L111)
+- [x] add support for github.com/julienschmidt/httprouter
+- [x] add examples for using with net/http and httprouter
+- [ ] makefile with gvt for deps now that we're depending on httprouter
+- [ ] circle.yml
+- [ ] add helper for compatibility with negroni (example: https://github.com/unrolled/secure/blob/v1/secure.go#L110-L111)
