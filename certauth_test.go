@@ -4,7 +4,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -103,11 +102,6 @@ func TestMiddleWare(t *testing.T) {
 	auth := certauth.NewAuth(certauth.Options{
 		AllowedOUs: []string{"endpoint", "titan"},
 		AllowedCNs: []string{"foo.com"},
-	})
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/foo", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "bar")
 	})
 
 	url := "https://foo.bar/foo"

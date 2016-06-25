@@ -3,16 +3,16 @@ package main
 /*
 Example using go stdlib net/http ListenAndServeTLS():
 
-	$ go run net_http.go &
+	$ go run main.go &
 
-	$ curl -kE ./test-fixtures/client1.pem https://localhost:8080/
+	$ curl -kE ../test-fixtures/client1.pem https://localhost:8080/
 	hello, world!
 
-	$ curl -kE ./test-fixtures/client2.pem https://localhost:8080/
+	$ curl -kE ../test-fixtures/client2.pem https://localhost:8080/
 	Authentication Failed
 
 	### NOTE: curl on macOS might require using the .p12 file instead of the .pem:
-	$ curl -kE ./test-fixtures/client1.p12:password https://localhost:8080/
+	$ curl -kE ../test-fixtures/client1.p12:password https://localhost:8080/
 */
 
 import (
@@ -29,7 +29,7 @@ func HelloServer(w http.ResponseWriter, req *http.Request) {
 }
 
 func main() {
-	caCerts, err := certutils.LoadCACertFile("test-fixtures/ca.crt")
+	caCerts, err := certutils.LoadCACertFile("../test-fixtures/ca.crt")
 	if err != nil {
 		log.Fatalf("Unable to load ca.crt: %s", err)
 	}
@@ -48,5 +48,5 @@ func main() {
 	}
 
 	server := certutils.NewTLSServer(cfg)
-	server.ListenAndServeTLS("test-fixtures/server.pem", "test-fixtures/server.pem")
+	server.ListenAndServeTLS("../test-fixtures/server.pem", "../test-fixtures/server.pem")
 }

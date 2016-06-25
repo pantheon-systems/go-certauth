@@ -3,22 +3,22 @@ package main
 /*
 Example using github.com/julienschmidt/httprouter:
 
-	$ go run httprouter.go &
+	$ go run main.go &
 
-	$ curl -kE ./test-fixtures/client1.pem https://localhost:8080/
+	$ curl -kE ../test-fixtures/client1.pem https://localhost:8080/
 	Welcome!
 
-	$ curl -kE ./test-fixtures/client2.pem https://localhost:8080/
+	$ curl -kE ../test-fixtures/client2.pem https://localhost:8080/
 	Welcome!
 
-	$ curl -kE ./test-fixtures/client1.pem https://localhost:8080/hello/foo
+	$ curl -kE ../test-fixtures/client1.pem https://localhost:8080/hello/foo
 	hello, foo!
 
-	$ curl -kE ./test-fixtures/client2.pem https://localhost:8080/hello/foo
+	$ curl -kE ../test-fixtures/client2.pem https://localhost:8080/hello/foo
 	Authentication Failed
 
 	### NOTE: curl on macOS might require using the .p12 file instead of the .pem:
-	$ curl -kE ./test-fixtures/client.p12:password https://localhost:8080/
+	$ curl -kE ../test-fixtures/client.p12:password https://localhost:8080/
 */
 
 import (
@@ -39,9 +39,13 @@ func Hello(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
 	fmt.Fprintf(w, "hello, %s!\n", ps.ByName("name"))
 }
 
+func HelloWithoutParams(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintf(w, "hello without params")
+}
+
 func main() {
 
-	caCerts, err := certutils.LoadCACertFile("test-fixtures/ca.crt")
+	caCerts, err := certutils.LoadCACertFile("../test-fixtures/ca.crt")
 	if err != nil {
 		log.Fatalf("Unable to load ca.crt: %s", err)
 	}
@@ -53,7 +57,8 @@ func main() {
 
 	router := httprouter.New()
 	router.GET("/", Index)
-	router.GET("/hello/:name", auth.RouterHandler(Hello))
+	router.GET("/hello1/:name", auth.RouterHandler(Hello))
+	router.Handler("GET", "/hello2/:name", auth.Handler(http.HandlerFunc(HelloWithoutParams)))
 
 	cfg := certutils.TLSServerConfig{
 		CertPool:    caCerts,
