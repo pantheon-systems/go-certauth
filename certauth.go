@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+
+	"github.com/julienschmidt/httprouter"
 )
 
 // TODO:(jnelson) Maybe a standardValidation method for our stuff? Thu May 14 18:41:41 2015
@@ -34,6 +36,7 @@ type Options struct {
 	AuthErrorHandler http.HandlerFunc
 }
 
+// Auth is an instance of the middleware
 type Auth struct {
 	opt            Options
 	authErrHandler http.Handler
@@ -77,6 +80,22 @@ func (a *Auth) Handler(h http.Handler) http.Handler {
 	})
 }
 
+// RouterHandler implements the httprouter.Handle for integration with github.com/julienschmidt/httprouter
+func (a *Auth) RouterHandler(h httprouter.Handle) httprouter.Handle {
+	return httprouter.Handle(func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+		// Let secure process the request. If it returns an error,
+		// that indicates the request should not continue.
+		err := a.Process(w, r)
+
+		// If there was an error, do not continue.
+		if err != nil {
+			return
+		}
+
+		h(w, r, ps)
+	})
+}
+
 // Process is the main Entrypoint
 func (a *Auth) Process(w http.ResponseWriter, r *http.Request) error {
 	// ensure we can process this request
@@ -106,7 +125,7 @@ func (a *Auth) Process(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// ValidateCN is a httprouter handler that will check the CN, and raise a 403 if the CN doesn't match client cert
+// ValidateCN checks the CN of one or more certs and raise a 403 if the CN doesn't match any CN in the AllowedCN list.
 func (a *Auth) ValidateCN(verifiedChains [][]*x509.Certificate) error {
 	var failed []string
 
@@ -123,7 +142,7 @@ func (a *Auth) ValidateCN(verifiedChains [][]*x509.Certificate) error {
 	return fmt.Errorf("cert failed CN validation for %v, Allowed: %v", failed, a.opt.AllowedCNs)
 }
 
-// ValidateCN is a httprouter handler that will check the CN, and raise a 403 if the CN doesn't match client cert
+// ValidateOU checks the OUs of one or more validated certs and raises 403 if none of the OUs match the AllowedOU list.
 func (a *Auth) ValidateOU(verifiedChains [][]*x509.Certificate) error {
 	var failed []string
 
@@ -139,5 +158,5 @@ func (a *Auth) ValidateOU(verifiedChains [][]*x509.Certificate) error {
 			}
 		}
 	}
-	return fmt.Errorf("cert failed OU validation for %v, Allowed: %v", failed, a.opt.AllowedCNs)
+	return fmt.Errorf("cert failed OU validation for %v, Allowed: %v", failed, a.opt.AllowedOUs)
 }

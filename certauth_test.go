@@ -4,33 +4,12 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"testing"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/pantheon-systems/go-certauth"
-)
-
-var (
-	authedCert = &x509.Certificate{
-		Subject: pkix.Name{
-			OrganizationalUnit: []string{"thiunit", "thatunit", "someunit"},
-		},
-	}
-	unauthedCert = &x509.Certificate{
-		Subject: pkix.Name{
-			OrganizationalUnit: []string{"thiunit", "thatunit"},
-		},
-	}
-	certChain1 = []*x509.Certificate{unauthedCert, authedCert}
-	certChain2 = []*x509.Certificate{unauthedCert, unauthedCert}
-	chains     = [][]*x509.Certificate{
-		certChain1,
-		certChain2,
-	}
 )
 
 func expect(t *testing.T, a interface{}, b interface{}) {
@@ -39,18 +18,76 @@ func expect(t *testing.T, a interface{}, b interface{}) {
 	}
 }
 
-func TestValidateOU(t *testing.T) {
-	ouAndcnAuth := certauth.NewAuth(certauth.Options{
-		AllowedOUs: []string{"someunit", "bestunit"},
-		AllowedCNs: []string{"foo.com", "bar.com"},
-	})
+// fakeCertChain will creates a single certificate given the OU and CN values.
+// The cert is then wrapped in a slice of "chains" [][]*x509.Certificate which is the
+// type found in the `http.Request.TLS.VerifiedChains` attribute.
+func fakeCertChain(ou []string, cn string) [][]*x509.Certificate {
+	cert := &x509.Certificate{
+		Subject: pkix.Name{
+			OrganizationalUnit: []string(ou),
+			CommonName:         string(cn),
+		},
+	}
+	chain := []*x509.Certificate{cert}
+	chains := [][]*x509.Certificate{chain}
+	return chains
+}
 
-	if err := ouAndcnAuth.ValidateOU(chains); err != nil {
-		t.Fatal("Expected OU to pass, but it failed: ", err)
+func TestValidateOU(t *testing.T) {
+	tests := []struct {
+		AllowedOUs     []string
+		ActualOUs      []string
+		ShouldValidate bool
+	}{
+		{[]string{"endpoint"}, []string{"endpoint"}, true},
+		{[]string{"endpoint"}, []string{"site"}, false},
+		{[]string{"endpoint"}, []string{""}, false},
+		{[]string{"endpoint", "titan"}, []string{"site"}, false},
+		{[]string{"endpoint", "titan"}, []string{"titan"}, true},
 	}
 
-	if err := ouAndcnAuth.ValidateCN(chains); err == nil {
-		t.Fatal("Expected CN to fail, but it didn't", spew.Sdump(ouAndcnAuth), spew.Sdump(chains))
+	for _, tc := range tests {
+		cert := fakeCertChain(tc.ActualOUs, "")
+		auth := certauth.NewAuth(certauth.Options{
+			AllowedOUs: tc.AllowedOUs,
+		})
+		err := auth.ValidateOU(cert)
+
+		if err != nil && tc.ShouldValidate {
+			t.Fatalf("Expected AllowedOUs (%v) and ActualOUs (%v) to pass validation, but it failed: err: %s", tc.AllowedOUs, tc.ActualOUs, err)
+		}
+
+		if err == nil && !tc.ShouldValidate {
+			t.Fatalf("Expected AllowedOUs (%v) and ActualOUs (%v) to failed validation, but it passed.", tc.AllowedOUs, tc.ActualOUs)
+		}
+	}
+}
+
+func TestValidateCN(t *testing.T) {
+	tests := []struct {
+		AllowedCNs     []string
+		ActualCN       string
+		ShouldValidate bool
+	}{
+		{[]string{"foo.com"}, "foo.com", true},
+		{[]string{"foo.com"}, "bar.com", false},
+		{[]string{"foo.com"}, "", false},
+	}
+
+	for _, tc := range tests {
+		cert := fakeCertChain([]string{""}, tc.ActualCN)
+		auth := certauth.NewAuth(certauth.Options{
+			AllowedCNs: tc.AllowedCNs,
+		})
+		err := auth.ValidateCN(cert)
+
+		if err != nil && tc.ShouldValidate {
+			t.Fatalf("Expected AllowedCNs (%v) and ActualCN (%v) to pass validation, but it failed: err: %s", tc.AllowedCNs, tc.ActualCN, err)
+		}
+
+		if err == nil && !tc.ShouldValidate {
+			t.Fatalf("Expected AllowedCNs (%v) and ActualCN (%v) to failed validation, but it passed.", tc.AllowedCNs, tc.ActualCN)
+		}
 	}
 }
 
@@ -59,13 +96,12 @@ var testHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) 
 })
 
 func TestMiddleWare(t *testing.T) {
-	a := certauth.NewAuth(certauth.Options{
-		AllowedOUs: []string{"someunit", "bestunit"},
-	})
+	allowedCert := fakeCertChain([]string{"endpoint"}, "foo.com")
+	failedCert := fakeCertChain([]string{"site"}, "foo.com")
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/foo", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "bar")
+	auth := certauth.NewAuth(certauth.Options{
+		AllowedOUs: []string{"endpoint", "titan"},
+		AllowedCNs: []string{"foo.com"},
 	})
 
 	url := "https://foo.bar/foo"
@@ -73,16 +109,17 @@ func TestMiddleWare(t *testing.T) {
 	// failed auth
 	req, _ := http.NewRequest("GET", url, nil)
 	req.TLS = &tls.ConnectionState{}
-	req.TLS.VerifiedChains = [][]*x509.Certificate{certChain2}
+	req.TLS.VerifiedChains = failedCert
 	w := httptest.NewRecorder()
-	a.Handler(testHandler).ServeHTTP(w, req)
+	auth.Handler(testHandler).ServeHTTP(w, req)
 	expect(t, w.Code, http.StatusForbidden)
 
 	//passed auth
 	w = httptest.NewRecorder()
-	req.TLS.VerifiedChains = [][]*x509.Certificate{certChain1}
-	a.Handler(testHandler).ServeHTTP(w, req)
+	req.TLS.VerifiedChains = allowedCert
+	auth.Handler(testHandler).ServeHTTP(w, req)
 	expect(t, w.Code, http.StatusOK)
 	expect(t, w.Body.String(), "bar")
-
 }
+
+// @TODO(joe): TestMiddleware using the RouterHandler too?
