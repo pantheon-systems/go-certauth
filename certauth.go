@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"bytes"
 
 	"github.com/julienschmidt/httprouter"
 )
@@ -103,9 +104,17 @@ func (a *Auth) Process(w http.ResponseWriter, r *http.Request) error {
 		return errors.New("no cert chain detected")
 	}
 
+	// TODO: Figure out if having multiple validated peer leaf certs is possible. For now, only validate
+	// one cert, and make sure it matches the first peer certificate
+	if r.TLS.PeerCertificates != nil {
+		if !bytes.Equal(r.TLS.PeerCertificates[0].Raw, r.TLS.VerifiedChains[0][0].Raw) {
+			return errors.New("First peer certificate not first verified chain leaf!")
+		}
+	}
+
 	// Validate OU
 	if len(a.opt.AllowedOUs) > 0 {
-		err := a.ValidateOU(r.TLS.VerifiedChains)
+		err := a.ValidateOU(r.TLS.VerifiedChains[0][0])
 		if err != nil {
 			a.authErrHandler.ServeHTTP(w, r)
 			return err
@@ -114,7 +123,7 @@ func (a *Auth) Process(w http.ResponseWriter, r *http.Request) error {
 
 	// Validate CN
 	if len(a.opt.AllowedCNs) > 0 {
-		err := a.ValidateCN(r.TLS.VerifiedChains)
+		err := a.ValidateCN(r.TLS.VerifiedChains[0][0])
 		if err != nil {
 			a.authErrHandler.ServeHTTP(w, r)
 			return err
@@ -125,37 +134,29 @@ func (a *Auth) Process(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// ValidateCN checks the CN of one or more certs and raise a 403 if the CN doesn't match any CN in the AllowedCN list.
-func (a *Auth) ValidateCN(verifiedChains [][]*x509.Certificate) error {
+// ValidateCN checks the CN of a verified peer cert and raises a 403 if the CN doesn't match any CN in the AllowedCNs list.
+func (a *Auth) ValidateCN(verifiedCert *x509.Certificate) error {
 	var failed []string
 
-	for _, chain := range verifiedChains {
-		for _, c := range chain {
-			for _, cn := range a.opt.AllowedCNs {
-				if cn == c.Subject.CommonName {
-					return nil
-				}
-				failed = append(failed, c.Subject.CommonName)
-			}
+	for _, cn := range a.opt.AllowedCNs {
+		if cn == verifiedCert.Subject.CommonName {
+			return nil
 		}
+		failed = append(failed, verifiedCert.Subject.CommonName)
 	}
 	return fmt.Errorf("cert failed CN validation for %v, Allowed: %v", failed, a.opt.AllowedCNs)
 }
 
-// ValidateOU checks the OUs of one or more validated certs and raises 403 if none of the OUs match the AllowedOU list.
-func (a *Auth) ValidateOU(verifiedChains [][]*x509.Certificate) error {
+// ValidateOU checks the OU of a verified peer cert and raises 403 if the OU doesn't match any OU in the AllowedOUs list.
+func (a *Auth) ValidateOU(verifiedCert *x509.Certificate) error {
 	var failed []string
 
-	for _, chain := range verifiedChains {
-		for _, c := range chain {
-			for _, ou := range a.opt.AllowedOUs {
-				for _, clientOU := range c.Subject.OrganizationalUnit {
-					if ou == clientOU {
-						return nil
-					}
-					failed = append(failed, clientOU)
-				}
+	for _, ou := range a.opt.AllowedOUs {
+		for _, clientOU := range verifiedCert.Subject.OrganizationalUnit {
+			if ou == clientOU {
+				return nil
 			}
+			failed = append(failed, clientOU)
 		}
 	}
 	return fmt.Errorf("cert failed OU validation for %v, Allowed: %v", failed, a.opt.AllowedOUs)
