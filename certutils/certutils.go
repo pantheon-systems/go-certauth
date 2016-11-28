@@ -9,6 +9,27 @@ import (
 	"net/http"
 )
 
+// TLSRPCServerConfig is the configuration you use to create a TLSRPCServer
+type TLSRPCServerConfig struct {
+	CertPool    *x509.CertPool
+	BindAddress string
+	Port        int
+}
+
+// NewTLSServer sets up a Pantheon(TM) RPC TLS server (_not_ the HTTP protocol) that requires and verifies peer cert.
+// func NewTLSRPCServer(config TLSRPCServerConfig) *http.Server {
+// 	server := &http.Server{
+// 		TLSConfig: &tls.Config{
+// 			ClientAuth: tls.RequireAndVerifyClientCert,
+// 			ClientCAs:  config.CertPool,
+// 		},
+// 		Addr:    fmt.Sprintf("%s:%d", config.BindAddress, config.Port),
+// 		Handler: config.Router,
+// 	}
+// 	server.TLSConfig.BuildNameToCertificate()
+// 	return server
+// }
+
 // TLSServerConfig is the configuration you use to create a TLSServer
 type TLSServerConfig struct {
 	CertPool    *x509.CertPool
@@ -17,7 +38,7 @@ type TLSServerConfig struct {
 	Router      http.Handler
 }
 
-// NewTLSServer sets up a Pantheon(TM) type of tls server that Requires and Verifies peer cert
+// NewTLSServer sets up a Pantheon(TM) HTTPS TLS server that requires and verifies peer cert
 func NewTLSServer(config TLSServerConfig) *http.Server {
 	// Setup client authentication
 	server := &http.Server{
@@ -48,7 +69,7 @@ func LoadKeyCertFiles(keyFile, certFile string) (tls.Certificate, error) {
 }
 
 // LoadCACertFile reads in a CA cert file that may contain multiple certs
-// and gives  you back a proper x509.CertPool for your fun and proffit
+// and gives you back a proper x509.CertPool for your fun and profit
 func LoadCACertFile(cert string) (*x509.CertPool, error) {
 	// validate caCert, and setup certpool
 	ca, err := ioutil.ReadFile(cert)
