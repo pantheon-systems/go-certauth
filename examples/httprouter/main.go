@@ -5,20 +5,20 @@ Example using github.com/julienschmidt/httprouter:
 
 	$ go run main.go &
 
-	$ curl -kE ../test-fixtures/client1.pem https://localhost:8080/
+	$ curl -kE ../test-fixtures/client1.pem https://localhost:18080/
 	Welcome!
 
-	$ curl -kE ../test-fixtures/client2.pem https://localhost:8080/
+	$ curl -kE ../test-fixtures/client2.pem https://localhost:18080/
 	Welcome!
 
-	$ curl -kE ../test-fixtures/client1.pem https://localhost:8080/hello/foo
+	$ curl -kE ../test-fixtures/client1.pem https://localhost:18080/hello/foo
 	hello, foo!
 
-	$ curl -kE ../test-fixtures/client2.pem https://localhost:8080/hello/foo
+	$ curl -kE ../test-fixtures/client2.pem https://localhost:18080/hello/foo
 	Authentication Failed
 
 	### NOTE: curl on macOS might require using the .p12 file instead of the .pem:
-	$ curl -kE ../test-fixtures/client.p12:password https://localhost:8080/
+	$ curl -kE ../test-fixtures/client.p12:password https://localhost:18080/
 */
 
 import (
@@ -63,7 +63,7 @@ func main() {
 	cfg := certutils.TLSServerConfig{
 		CertPool:    caCerts,
 		BindAddress: "",
-		Port:        8080,
+		Port:        18080,
 		Router:      router,
 	}
 

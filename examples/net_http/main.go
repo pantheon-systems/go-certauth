@@ -5,14 +5,14 @@ Example using go stdlib net/http ListenAndServeTLS():
 
 	$ go run main.go &
 
-	$ curl -kE ../test-fixtures/client1.pem https://localhost:8080/
+	$ curl -kE ../test-fixtures/client1.pem https://localhost:18080/
 	hello, world!
 
-	$ curl -kE ../test-fixtures/client2.pem https://localhost:8080/
+	$ curl -kE ../test-fixtures/client2.pem https://localhost:18080/
 	Authentication Failed
 
 	### NOTE: curl on macOS might require using the .p12 file instead of the .pem:
-	$ curl -kE ../test-fixtures/client1.p12:password https://localhost:8080/
+	$ curl -kE ../test-fixtures/client1.p12:password https://localhost:18080/
 */
 
 import (
@@ -43,7 +43,7 @@ func main() {
 	cfg := certutils.TLSServerConfig{
 		CertPool:    caCerts,
 		BindAddress: "",
-		Port:        8080,
+		Port:        18080,
 		Router:      router,
 	}
 
