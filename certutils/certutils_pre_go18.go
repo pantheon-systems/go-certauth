@@ -1,4 +1,4 @@
-// +build go1.8
+// +build !go1.8
 
 package certutils
 
@@ -40,7 +40,6 @@ func NewTLSConfig(level TLSConfigLevel) *tls.Config {
 		// Only use curves which have assembly implementations
 		c.CurvePreferences = []tls.CurveID{
 			tls.CurveP256,
-			tls.X25519,
 		}
 	case TLSConfigModern:
 		// Modern compat sets TLS_1.2 minimum version and a set of ciphers that support PFS
@@ -48,8 +47,6 @@ func NewTLSConfig(level TLSConfigLevel) *tls.Config {
 		c.CipherSuites = []uint16{
 			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
 			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
-			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
 			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
 			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
 		}
@@ -77,13 +74,11 @@ func NewTLSServer(config TLSServerConfig) *http.Server {
 
 	// Setup client authentication
 	server := &http.Server{
-		ReadHeaderTimeout: 5 * time.Second, // Go 1.8 only
-		ReadTimeout:       5 * time.Second,
-		WriteTimeout:      10 * time.Second,
-		IdleTimeout:       120 * time.Second, // Go 1.8 only
-		TLSConfig:         tlsConfig,
-		Addr:              fmt.Sprintf("%s:%d", config.BindAddress, config.Port),
-		Handler:           config.Router,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		TLSConfig:    tlsConfig,
+		Addr:         fmt.Sprintf("%s:%d", config.BindAddress, config.Port),
+		Handler:      config.Router,
 	}
 	server.TLSConfig.BuildNameToCertificate()
 	return server
