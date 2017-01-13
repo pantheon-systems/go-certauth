@@ -1,5 +1,3 @@
-## Warning not ready to be used yet
-
 certauth
 ========
 [![Go Report Card](https://goreportcard.com/badge/github.com/pantheon-systems/go-certauth)](https://goreportcard.com/report/github.com/pantheon-systems/go-certauth)
