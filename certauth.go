@@ -1,13 +1,29 @@
 package certauth
 
 import (
+	"bytes"
+	"context"
 	"crypto/x509"
 	"errors"
 	"fmt"
 	"net/http"
-	"bytes"
 
 	"github.com/julienschmidt/httprouter"
+)
+
+// These shenanigans are here to ensure we have strings on our context keys, and they are unique to our package
+type contextKey string
+
+func (c contextKey) String() string {
+	return "certauth context " + string(c)
+}
+
+const (
+	//HasAuthorizedOU is used as the request context key, adding info about the authorized OU if authorization succeded
+	HasAuthorizedOU = contextKey("Has Authorized OU")
+
+	//HasAuthorizedCN is used as the request context key, adding info about the authroized CN if authorization succeeded
+	HasAuthorizedCN = contextKey("Has Authorized CN")
 )
 
 // TODO:(jnelson) Maybe a standardValidation method for our stuff? Thu May 14 18:41:41 2015
@@ -70,14 +86,21 @@ func (a *Auth) Handler(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Let secure process the request. If it returns an error,
 		// that indicates the request should not continue.
-		err := a.Process(w, r)
-
-		// If there was an error, do not continue.
-		if err != nil {
+		if err := a.Process(w, r); err != nil {
+			// if process returned an error request should not continue
 			return
 		}
 
-		h.ServeHTTP(w, r)
+		ctx := r.Context()
+		if len(a.opt.AllowedOUs) > 0 {
+			ctx = context.WithValue(ctx, HasAuthorizedOU, r.TLS.VerifiedChains[0][0].Subject.OrganizationalUnit)
+		}
+
+		if len(a.opt.AllowedCNs) > 0 {
+			ctx = context.WithValue(ctx, HasAuthorizedCN, r.TLS.VerifiedChains[0][0].Subject.CommonName)
+		}
+
+		h.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
@@ -86,10 +109,7 @@ func (a *Auth) RouterHandler(h httprouter.Handle) httprouter.Handle {
 	return httprouter.Handle(func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
 		// Let secure process the request. If it returns an error,
 		// that indicates the request should not continue.
-		err := a.Process(w, r)
-
-		// If there was an error, do not continue.
-		if err != nil {
+		if err := a.Process(w, r); err != nil {
 			return
 		}
 
@@ -97,8 +117,8 @@ func (a *Auth) RouterHandler(h httprouter.Handle) httprouter.Handle {
 	})
 }
 
-// Process is the main Entrypoint
-func (a *Auth) Process(w http.ResponseWriter, r *http.Request) error {
+// ValidateRequest perfomrs verification on the TLS certs and chain
+func (a *Auth) ValidateRequest(r *http.Request) error {
 	// ensure we can process this request
 	if r.TLS == nil || r.TLS.VerifiedChains == nil {
 		return errors.New("no cert chain detected")
@@ -108,8 +128,17 @@ func (a *Auth) Process(w http.ResponseWriter, r *http.Request) error {
 	// one cert, and make sure it matches the first peer certificate
 	if r.TLS.PeerCertificates != nil {
 		if !bytes.Equal(r.TLS.PeerCertificates[0].Raw, r.TLS.VerifiedChains[0][0].Raw) {
-			return errors.New("First peer certificate not first verified chain leaf!")
+			return errors.New("first peer certificate not first verified chain leaf")
 		}
+	}
+
+	return nil
+}
+
+// Process is the main Entrypoint
+func (a *Auth) Process(w http.ResponseWriter, r *http.Request) error {
+	if err := a.ValidateRequest(r); err != nil {
+		return err
 	}
 
 	// Validate OU
@@ -129,8 +158,6 @@ func (a *Auth) Process(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 	}
-
-	// Set Headers
 	return nil
 }
 

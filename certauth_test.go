@@ -139,10 +139,12 @@ func TestMiddleWare(t *testing.T) {
 	url := "https://foo.bar/foo"
 
 	// failed auth
+
+	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", url, nil)
 	req.TLS = &tls.ConnectionState{}
 	req.TLS.VerifiedChains = failedCert
-	w := httptest.NewRecorder()
+
 	auth.Handler(testHandler).ServeHTTP(w, req)
 	expect(t, w.Code, http.StatusForbidden)
 
@@ -152,6 +154,18 @@ func TestMiddleWare(t *testing.T) {
 	auth.Handler(testHandler).ServeHTTP(w, req)
 	expect(t, w.Code, http.StatusOK)
 	expect(t, w.Body.String(), "bar")
+
+	testCtxHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		val, ok := r.Context().Value(certauth.HasAuthorizedCN).(string)
+		if !ok {
+			t.Fatal("Context did not set context HasAuthorizedCN")
+		}
+		expect(t, val, "foo.com")
+	})
+
+	w = httptest.NewRecorder()
+	auth.Handler(testCtxHandler).ServeHTTP(w, req)
+
 }
 
 // @TODO(joe): TestMiddleware using the RouterHandler too?
