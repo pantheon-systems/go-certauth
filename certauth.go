@@ -93,11 +93,11 @@ func (a *Auth) Handler(h http.Handler) http.Handler {
 
 		ctx := r.Context()
 		if len(a.opt.AllowedOUs) > 0 {
-			ctx = context.WithValue(r.Context(), HasAuthorizedOU, r.TLS.VerifiedChains[0][0].Subject.OrganizationalUnit)
+			ctx = context.WithValue(ctx, HasAuthorizedOU, r.TLS.VerifiedChains[0][0].Subject.OrganizationalUnit)
 		}
 
 		if len(a.opt.AllowedCNs) > 0 {
-			ctx = context.WithValue(r.Context(), HasAuthorizedCN, r.TLS.VerifiedChains[0][0].Subject.CommonName)
+			ctx = context.WithValue(ctx, HasAuthorizedCN, r.TLS.VerifiedChains[0][0].Subject.CommonName)
 		}
 
 		h.ServeHTTP(w, r.WithContext(ctx))

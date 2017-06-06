@@ -1,0 +1,23 @@
+---
+machine:
+  environment:
+    GOVERSION: 1.8.3
+    GOPATH: /home/ubuntu/go_workspace
+    GOROOT: /home/ubuntu/go
+    PATH: /home/ubuntu/go/bin:$GOPATH/bin:$PATH
+  services:
+    - docker
+
+dependencies:
+  cache_directories:
+    - ~/go
+    - ~/bin
+  override:
+    - bash scripts/install-go.sh
+    - go get -u github.com/golang/dep/cmd/dep
+    - cd $GOPATH/src/github.com/pantheon-systems/go-certauth/ ; dep ensure
+
+
+test:
+  override:
+    - cd $GOPATH/src/github.com/pantheon-systems/go-certauth/ ; go test
