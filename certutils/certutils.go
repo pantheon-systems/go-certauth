@@ -64,16 +64,21 @@ type TLSServerConfig struct {
 	Port           int
 	Router         http.Handler
 	TLSConfigLevel TLSConfigLevel
+	TLSConfig      *tls.Config
 }
 
 // NewTLSServer sets up a Pantheon(TM) type of tls server that Requires and Verifies peer cert
 func NewTLSServer(config TLSServerConfig) *http.Server {
 	// Setup our TLS config
-	tlsConfig := NewTLSConfig(config.TLSConfigLevel)
+	tlsConfig := config.TLSConfig
+	if tlsConfig == nil {
+		tlsConfig = NewTLSConfig(config.TLSConfigLevel)
+	}
 
 	// By default this server will require client MTLS certs and verify cert validity against the config.CertPool CA bundle
 	tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
 	tlsConfig.ClientCAs = config.CertPool
+	tlsConfig.RootCAs = config.CertPool
 
 	// Setup client authentication
 	server := &http.Server{
@@ -93,14 +98,10 @@ func NewTLSServer(config TLSServerConfig) *http.Server {
 // and cert file paths as strings and returns you a proper tls.Certificate
 func LoadKeyCertFiles(keyFile, certFile string) (tls.Certificate, error) {
 	// validate the server keypair
-	cert, err := tls.LoadX509KeyPair(
-		certFile,
-		keyFile,
-	)
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
 		return cert, fmt.Errorf("could not load TLS key pair: %s", err.Error())
 	}
-
 	return cert, nil
 }
 
