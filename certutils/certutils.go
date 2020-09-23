@@ -64,6 +64,7 @@ type TLSServerConfig struct {
 	Port           int
 	Router         http.Handler
 	TLSConfigLevel TLSConfigLevel
+	GetCertificate func(*tls.ClientHelloInfo) (*tls.Certificate, error)
 }
 
 // NewTLSServer sets up a Pantheon(TM) type of tls server that Requires and Verifies peer cert
@@ -74,6 +75,10 @@ func NewTLSServer(config TLSServerConfig) *http.Server {
 	// By default this server will require client MTLS certs and verify cert validity against the config.CertPool CA bundle
 	tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
 	tlsConfig.ClientCAs = config.CertPool
+
+	if config.GetCertificate != nil {
+		tlsConfig.GetCertificate = config.GetCertificate
+	}
 
 	// Setup client authentication
 	server := &http.Server{
