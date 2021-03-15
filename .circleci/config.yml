@@ -52,9 +52,7 @@ jobs:
       - checkout
       - restore-go-mod-cache
       - save-build-num
-      # FIXME: this project does not have a makefile!
-      - run: go test
-      - run: go build
+      - run: make
       - save-go-mod-cache
       - save-workspace
 
