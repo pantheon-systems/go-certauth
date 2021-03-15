@@ -1,0 +1,65 @@
+---
+version: 2.1
+
+
+executors:
+  go-build:
+    docker:
+      - image: quay.io/getpantheon/go-build:latest
+        auth:
+          username: $QUAY_USER
+          password: $QUAY_PASSWD
+commands:
+  # commands to persist and load CIRCLE_BUILD_NUM across jobs:
+  save-build-num:
+    steps:
+      - run: echo "export CIRCLE_BUILD_NUM=$CIRCLE_BUILD_NUM" > circle-build-num
+  load-build-num:
+    steps:
+      - run: cat circle-build-num >> $BASH_ENV
+
+  # go.mod caching:
+  save-go-mod-cache:
+    steps:
+      - save_cache:
+          key: v4-dependencies-{{ checksum "go.sum" }}
+          paths:
+            - /go/pkg/mod
+            - /home/circleci/go/pkg/mod
+  restore-go-mod-cache:
+    steps:
+      - restore_cache:
+          keys:
+            - v4-dependencies-{{ checksum "go.sum" }}
+
+  # save/restore worksapce (git checkout + artifacts) across jobs:
+  save-workspace:
+    steps:
+      - persist_to_workspace:
+          root: .
+          paths:
+            - ./
+  restore-workspace:
+    steps:
+      - attach_workspace:
+          at: .
+
+jobs:
+  # Tests the code and lints it
+  test:
+    executor: go-build
+    steps:
+      - checkout
+      - restore-go-mod-cache
+      - save-build-num
+      # FIXME: this project does not have a makefile!
+      - run: go test
+      - run: go build
+      - save-go-mod-cache
+      - save-workspace
+
+workflows:
+  version: 2
+  test:
+    jobs:
+      - test
