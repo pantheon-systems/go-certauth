@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/x509"
 	"errors"
-	"fmt"
 	"net/http"
 
 	"github.com/julienschmidt/httprouter"
@@ -41,10 +40,17 @@ const (
 // Options is the configuration for a Auth handler
 type Options struct {
 	// AllowedOUs is an exact string match against the Client Certs OU's
+	// This gets injected into AuthorizationCheckers using AllowOUsandCNs.
 	AllowedOUs []string
 
 	// AllowedCNs is an exact string match against the Client Certs CN
+	// This gets injected into AuthorizationCheckers using AllowOUsandCNs.
 	AllowedCNs []string
+
+	// Performs Authorization checks
+	// Each check validates that the client is authorized to the requested resource.
+	// See documentation for AuthorizationChecker for details on the checks.
+	AuthorizationCheckers []AuthorizationChecker
 
 	// Populate Headers with auth info
 	SetReqHeaders bool
@@ -71,6 +77,13 @@ func NewAuth(opts ...Options) *Auth {
 		h = o.AuthErrorHandler
 	}
 
+	if len(o.AllowedOUs) > 0 || len(o.AllowedCNs) > 0 {
+		o.AuthorizationCheckers = append(
+			o.AuthorizationCheckers,
+			AllowOUsandCNs(o.AllowedOUs, o.AllowedCNs),
+		)
+	}
+
 	return &Auth{
 		opt:            o,
 		authErrHandler: http.HandlerFunc(h),
@@ -86,21 +99,13 @@ func (a *Auth) Handler(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Let secure process the request. If it returns an error,
 		// that indicates the request should not continue.
-		if err := a.Process(w, r); err != nil {
+		var err error
+		if r, err = a.Process(w, r); err != nil {
 			// if process returned an error request should not continue
 			return
 		}
 
-		ctx := r.Context()
-		if len(a.opt.AllowedOUs) > 0 {
-			ctx = context.WithValue(ctx, HasAuthorizedOU, r.TLS.VerifiedChains[0][0].Subject.OrganizationalUnit)
-		}
-
-		if len(a.opt.AllowedCNs) > 0 {
-			ctx = context.WithValue(ctx, HasAuthorizedCN, r.TLS.VerifiedChains[0][0].Subject.CommonName)
-		}
-
-		h.ServeHTTP(w, r.WithContext(ctx))
+		h.ServeHTTP(w, r)
 	})
 }
 
@@ -109,7 +114,8 @@ func (a *Auth) RouterHandler(h httprouter.Handle) httprouter.Handle {
 	return httprouter.Handle(func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
 		// Let secure process the request. If it returns an error,
 		// that indicates the request should not continue.
-		if err := a.Process(w, r); err != nil {
+		var err error
+		if r, err = a.ProcessWithParams(w, r, ps); err != nil {
 			return
 		}
 
@@ -117,7 +123,48 @@ func (a *Auth) RouterHandler(h httprouter.Handle) httprouter.Handle {
 	})
 }
 
-// ValidateRequest perfomrs verification on the TLS certs and chain
+// Process validates a request and sets context parameters according to the
+// configured AuthorizationCheckers.
+// Returns an http.Request with additional context values applied, or an error if
+// something went wrong.
+// In practice, this just calls ProcessWithParams.
+func (a *Auth) Process(w http.ResponseWriter, r *http.Request) (*http.Request, error) {
+	return a.ProcessWithParams(w, r, nil)
+}
+
+// ProcessWithParams validates a request and sets context parameters according to the
+// configured AuthorizationCheckers.
+// Returns an http.Request with additional context values applied, or an error if
+// something went wrong.
+func (a *Auth) ProcessWithParams(
+	w http.ResponseWriter, r *http.Request, ps httprouter.Params,
+) (*http.Request, error) {
+	if err := a.ValidateRequest(r); err != nil {
+		return nil, err
+	}
+
+	ctxParams, err := a.CheckAuthorization(r.TLS.VerifiedChains[0][0], ps)
+	if err != nil {
+		a.authErrHandler.ServeHTTP(w, r)
+		return nil, err
+	}
+
+	if len(ctxParams) == 0 {
+		// No need to update the context; just return the one we already have
+		return r, nil
+	}
+
+	// Prepare a new context with the additional values
+	ctx := r.Context()
+	for k, v := range ctxParams {
+		ctx = context.WithValue(ctx, k, v)
+	}
+
+	// Replace the context on the request object
+	return r.WithContext(ctx), nil
+}
+
+// ValidateRequest performs verification on the TLS certs and chain
 func (a *Auth) ValidateRequest(r *http.Request) error {
 	// ensure we can process this request
 	if r.TLS == nil || r.TLS.VerifiedChains == nil {
@@ -135,56 +182,37 @@ func (a *Auth) ValidateRequest(r *http.Request) error {
 	return nil
 }
 
-// Process is the main Entrypoint
-func (a *Auth) Process(w http.ResponseWriter, r *http.Request) error {
-	if err := a.ValidateRequest(r); err != nil {
-		return err
-	}
+// CheckAuthorization runs each of the AuthorizationCheckers configured for the server
+// and returns an error if any of them return False.
+// See the documentation for AuthorizationChecker for more details.
+func (a *Auth) CheckAuthorization(
+	verifiedCert *x509.Certificate, ps httprouter.Params,
+) (map[ContextKey]ContextValue, error) {
+	ou := verifiedCert.Subject.OrganizationalUnit
+	cn := verifiedCert.Subject.CommonName
 
-	// Validate OU
-	if len(a.opt.AllowedOUs) > 0 {
-		err := a.ValidateOU(r.TLS.VerifiedChains[0][0])
+	ctxParams := make(map[ContextKey]ContextValue)
+	var (
+		params map[ContextKey]ContextValue
+		err    error
+	)
+
+	for _, ck := range a.opt.AuthorizationCheckers {
+		if ps == nil { // not using httprouter
+			params, err = ck.CheckAuthorization(ou, cn)
+		} else { // using httprouter
+			params, err = ck.CheckAuthorizationWithParams(ou, cn, ps)
+		}
 		if err != nil {
-			a.authErrHandler.ServeHTTP(w, r)
-			return err
+			return nil, err
 		}
-	}
 
-	// Validate CN
-	if len(a.opt.AllowedCNs) > 0 {
-		err := a.ValidateCN(r.TLS.VerifiedChains[0][0])
-		if err != nil {
-			a.authErrHandler.ServeHTTP(w, r)
-			return err
-		}
-	}
-	return nil
-}
-
-// ValidateCN checks the CN of a verified peer cert and raises a 403 if the CN doesn't match any CN in the AllowedCNs list.
-func (a *Auth) ValidateCN(verifiedCert *x509.Certificate) error {
-	var failed []string
-
-	for _, cn := range a.opt.AllowedCNs {
-		if cn == verifiedCert.Subject.CommonName {
-			return nil
-		}
-		failed = append(failed, verifiedCert.Subject.CommonName)
-	}
-	return fmt.Errorf("cert failed CN validation for %v, Allowed: %v", failed, a.opt.AllowedCNs)
-}
-
-// ValidateOU checks the OU of a verified peer cert and raises 403 if the OU doesn't match any OU in the AllowedOUs list.
-func (a *Auth) ValidateOU(verifiedCert *x509.Certificate) error {
-	var failed []string
-
-	for _, ou := range a.opt.AllowedOUs {
-		for _, clientOU := range verifiedCert.Subject.OrganizationalUnit {
-			if ou == clientOU {
-				return nil
+		// Collect the context params from each AuthorizationChecker into one map
+		if params != nil {
+			for k, v := range params {
+				ctxParams[k] = v
 			}
-			failed = append(failed, clientOU)
 		}
 	}
-	return fmt.Errorf("cert failed OU validation for %v, Allowed: %v", failed, a.opt.AllowedOUs)
+	return ctxParams, nil
 }

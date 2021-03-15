@@ -4,11 +4,14 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"testing"
 
+	"github.com/julienschmidt/httprouter"
 	"github.com/pantheon-systems/go-certauth"
 )
 
@@ -44,7 +47,7 @@ func fakeCertChain(certs [][]fakeCertData) [][]*x509.Certificate {
 	return fakeCertChains
 }
 
-func TestValidateOU(t *testing.T) {
+func TestDirectlyValidateOU(t *testing.T) {
 	tests := []struct {
 		AllowedOUs     []string
 		ActualOUs      []string
@@ -67,7 +70,7 @@ func TestValidateOU(t *testing.T) {
 		auth := certauth.NewAuth(certauth.Options{
 			AllowedOUs: tc.AllowedOUs,
 		})
-		err := auth.ValidateOU(cert[0][0])
+		_, err := auth.CheckAuthorization(cert[0][0], nil)
 
 		if err != nil && tc.ShouldValidate {
 			t.Fatalf("Expected AllowedOUs (%v) and ActualOUs (%v) to pass validation, but it failed: err: %s", tc.AllowedOUs, tc.ActualOUs, err)
@@ -79,7 +82,7 @@ func TestValidateOU(t *testing.T) {
 	}
 }
 
-func TestValidateCN(t *testing.T) {
+func TestDirectlyValidateCN(t *testing.T) {
 	tests := []struct {
 		AllowedCNs     []string
 		ActualCN       string
@@ -100,7 +103,7 @@ func TestValidateCN(t *testing.T) {
 		auth := certauth.NewAuth(certauth.Options{
 			AllowedCNs: tc.AllowedCNs,
 		})
-		err := auth.ValidateCN(cert[0][0])
+		_, err := auth.CheckAuthorization(cert[0][0], nil)
 
 		if err != nil && tc.ShouldValidate {
 			t.Fatalf("Expected AllowedCNs (%v) and ActualCN (%v) to pass validation, but it failed: err: %s", tc.AllowedCNs, tc.ActualCN, err)
@@ -116,7 +119,30 @@ var testHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) 
 	w.Write([]byte("bar"))
 })
 
-func TestMiddleWare(t *testing.T) {
+func makeTestCNHandler(t *testing.T, name string) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		val, ok := r.Context().Value(certauth.HasAuthorizedCN).(string)
+		if !ok {
+			t.Fatal("Context did not set context HasAuthorizedCN")
+		}
+		expect(t, val, name)
+		fmt.Fprintf(w, "%s", name)
+	})
+}
+
+func makeTestCNRouterHandler(t *testing.T) httprouter.Handle {
+	return httprouter.Handle(func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+		param := ps.ByName("test_param")
+		val, ok := r.Context().Value(certauth.HasAuthorizedCN).(string)
+		if !ok {
+			t.Fatal("Context did not set context HasAuthorizedCN")
+		}
+		expect(t, val, param)
+		fmt.Fprintf(w, "%s", param)
+	})
+}
+
+func TestMiddleware(t *testing.T) {
 	allowedFakeCertData := [][]fakeCertData{
 		[]fakeCertData{
 			fakeCertData{[]string{"endpoint"}, "foo.com"},
@@ -155,17 +181,67 @@ func TestMiddleWare(t *testing.T) {
 	expect(t, w.Code, http.StatusOK)
 	expect(t, w.Body.String(), "bar")
 
-	testCtxHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		val, ok := r.Context().Value(certauth.HasAuthorizedCN).(string)
-		if !ok {
-			t.Fatal("Context did not set context HasAuthorizedCN")
-		}
-		expect(t, val, "foo.com")
-	})
-
+	// check that the CN is passed in as context
 	w = httptest.NewRecorder()
-	auth.Handler(testCtxHandler).ServeHTTP(w, req)
-
+	// NOTE: that the handler function has more assertions!
+	auth.Handler(makeTestCNHandler(t, "foo.com")).ServeHTTP(w, req)
+	expect(t, w.Code, http.StatusOK)
+	expect(t, w.Body.String(), "foo.com")
 }
 
-// @TODO(joe): TestMiddleware using the RouterHandler too?
+func TestRouterMiddleware(t *testing.T) {
+	testRouterHandler := httprouter.Handle(func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+		fmt.Fprintf(w, "%s", ps.ByName("test_param"))
+	})
+	allowedFakeCertData := [][]fakeCertData{
+		[]fakeCertData{
+			fakeCertData{[]string{"endpoint"}, "foo.com"},
+		},
+	}
+	allowedCert := fakeCertChain(allowedFakeCertData)
+	failedFakeCertData := [][]fakeCertData{
+		[]fakeCertData{
+			fakeCertData{[]string{"site"}, "foo.com"},
+			fakeCertData{[]string{"endpoint"}, "foo.com"},
+		},
+	}
+	failedCert := fakeCertChain(failedFakeCertData)
+
+	auth := certauth.NewAuth(certauth.Options{
+		AuthorizationCheckers: []certauth.AuthorizationChecker{
+			certauth.AllowOUsandCNs([]string{"endpoint", "titan"}, []string{"foo.com"}),
+		},
+	})
+
+	name_param := "lorem"
+	url1 := fmt.Sprintf("https://foo.bar/foo/%s/bar", name_param)
+	url2 := fmt.Sprintf("https://foo.bar/test/%s/cn", "foo.com")
+	rtr := httprouter.New()
+	rtr.GET("/foo/:test_param/bar", auth.RouterHandler(testRouterHandler))
+	rtr.GET("/test/:test_param/cn", auth.RouterHandler(makeTestCNRouterHandler(t)))
+
+	// failed auth
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", url1, nil)
+	req.TLS = &tls.ConnectionState{}
+	req.TLS.VerifiedChains = failedCert
+
+	rtr.ServeHTTP(w, req)
+	expect(t, w.Code, http.StatusForbidden)
+
+	//passed auth
+	w = httptest.NewRecorder()
+	req.TLS.VerifiedChains = allowedCert
+	rtr.ServeHTTP(w, req)
+	expect(t, w.Code, http.StatusOK)
+	expect(t, w.Body.String(), name_param)
+
+	// check that the CN is passed in as context
+	w = httptest.NewRecorder()
+	req.URL, _ = url.Parse(url2)
+	// NOTE: the handler has assertions for the checks
+	rtr.ServeHTTP(w, req)
+	expect(t, w.Code, http.StatusOK)
+	expect(t, w.Body.String(), "foo.com")
+}
