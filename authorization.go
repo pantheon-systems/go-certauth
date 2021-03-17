@@ -98,20 +98,17 @@ func allowedCN(allowedCNs []string, clientCN string) error {
 		}
 	}
 	return fmt.Errorf(
-		"cert failed CN validation for %v, Allowed: %v", clientCN, allowedCNs)
+		"cert failed CN validation for %q, allowed: %v", clientCN, allowedCNs)
 }
 
 func allowedOU(allowedOUs []string, clientOUs []string) error {
-	var failed []string
-
 	for _, ou := range allowedOUs {
 		for _, clientOU := range clientOUs {
 			if ou == clientOU {
 				return nil
 			}
-			failed = append(failed, clientOU)
 		}
 	}
 	return fmt.Errorf(
-		"cert failed OU validation for %v, Allowed: %v", failed, allowedOUs)
+		"cert failed OU validation for %v, allowed: %v", clientOUs, allowedOUs)
 }
