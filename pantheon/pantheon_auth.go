@@ -29,14 +29,14 @@ const (
 // Helper function which produces AuthorizationCheckers suitable for use in Pantheon HTTP servers.
 // This function accepts three lists which determine which clients pass authorization checks
 // and produces 2 AuthorizationCheckers to implement these checks.
-// `allowedOUs` and `allowedCNs` determine which clients will be allowed to pass authorization
+// `allowedOUs` determines which client OUs will be allowed to pass authorization
 // checks. Clients with an OU within `siteOUs` will be subject to an additional check for valid
 // site authorization. See below for a description of how site authorization works.
-// Requests are allowed if they pass `allowedOUs`, `allowedCNs` *and* site authorization
+// Requests are allowed if they pass `allowedOUs` *and* site authorization
 // (if applicable). Note that this means `siteOUs` should be a subset of `allowedOUs` otherwise
 // site authorization checks will always fail.
-// See also the documentation for AllowSpecificOUandCNs for more details on the behavior or
-// `allowedOUs` and `allowedCNs`.
+// See also the documentation for AllowSpecificOUandCNs for more details on the behavior of
+// `allowedOUs`.
 //
 // Site authorization checks are intended to protect resources belonging to one site (i.e. with a
 // `site` URI parameter) from being accessed by requests from other sites.
@@ -63,17 +63,22 @@ const (
 // 1. Parse the request x509's CommonName to obtain the site ID.
 // 2. Obtain the site ID from the URI parameters.
 // 3. Ensure the site ID from the CommonName and site ID from the URI parameters match.
-func PantheonSiteAuth(allowedOUs, allowedCNs, siteOUs []string) []certauth.AuthorizationChecker {
+func PantheonSiteAuth(allowedOUs, siteOUs []string, allowSelf bool) []certauth.AuthorizationChecker {
 	return []certauth.AuthorizationChecker{
-		certauth.AllowOUsandCNs(allowedOUs, allowedCNs),
-		PantheonSiteAuthChecker{siteOUs},
+		// allowedCNs is nil here cause it makes no sense to first check that the client's CN
+		// exactly matches one of several strings, and then parse it to get it's site ID which
+		// must match something else. Effectively PantheonSiteAuthChecker replaces the allowedCNs
+		// check.
+		certauth.AllowOUsandCNs(allowedOUs, nil),
+		PantheonSiteAuthChecker{siteOUs, allowSelf},
 	}
 }
 
 // PantheonSiteAuth is an instance of AuthorizationChecker which performs pantheon-specific
 // site authorization checks. See documentation for PantheonSiteAuth for details.
 type PantheonSiteAuthChecker struct {
-	SiteOUs []string
+	SiteOUs   []string
+	AllowSelf bool
 }
 
 func (check PantheonSiteAuthChecker) CheckAuthorization(
@@ -108,6 +113,10 @@ func (check PantheonSiteAuthChecker) CheckAuthorizationWithParams(
 	if err != nil {
 		// Couldn't parse site/env from CN, so reject the request...
 		return nil, err
+	}
+
+	if uriSite == "self" && check.AllowSelf {
+		return prepareSiteContextParams(certSite, certEnv), nil
 	}
 
 	if certSite != uriSite {
