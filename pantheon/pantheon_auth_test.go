@@ -65,10 +65,10 @@ func TestSiteAuthorization(t *testing.T) {
 		AuthorizationCheckers: pantheon_auth.PantheonSiteAuth(
 			// Only allow OUs `site` and `engineering`
 			[]string{"site", "engineering"},
-			// No restrictions on CNs
-			nil,
 			// If the OU is `site` do a site-authorization check
 			[]string{"site"},
+			// Allow the `self` site
+			true,
 		),
 	})
 
@@ -102,6 +102,7 @@ func TestSiteAuthorization(t *testing.T) {
 		},
 	)))
 
+	selfurl := "https://foo.bar" + strings.ReplaceAll(siteResource, ":site", "self")
 	site1 := "00c66762-d8ac-450b-b368-459c5d4f6aab"
 	site1url := "https://foo.bar" + strings.ReplaceAll(siteResource, ":site", site1)
 	nsite1url := "https://foo.bar" + strings.ReplaceAll(nonSiteResource, ":nosite", site1)
@@ -136,6 +137,10 @@ func TestSiteAuthorization(t *testing.T) {
 				expCode: http.StatusOK,
 				expBody: fmt.Sprintf("<none>,%s", site2),
 			},
+			selfurl: {
+				expCode: http.StatusOK,
+				expBody: fmt.Sprintf("<none>,%s", "self"),
+			},
 			nsite1url: {
 				expCode: http.StatusOK,
 				expBody: fmt.Sprintf("<none>,%s", site1),
@@ -154,6 +159,10 @@ func TestSiteAuthorization(t *testing.T) {
 				expCode: http.StatusForbidden,
 				expBody: "Authentication Failed",
 			},
+			selfurl: {
+				expCode: http.StatusOK,
+				expBody: fmt.Sprintf("%s,%s", site1, "self"),
+			},
 			nsite1url: {
 				expCode: http.StatusOK,
 				expBody: fmt.Sprintf("<none>,%s", site1),
@@ -171,6 +180,10 @@ func TestSiteAuthorization(t *testing.T) {
 			site2url: {
 				expCode: http.StatusOK,
 				expBody: fmt.Sprintf("%s,%s", site2, site2),
+			},
+			selfurl: {
+				expCode: http.StatusOK,
+				expBody: fmt.Sprintf("%s,%s", site2, "self"),
 			},
 			nsite1url: {
 				expCode: http.StatusOK,
