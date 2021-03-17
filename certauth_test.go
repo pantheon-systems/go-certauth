@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"reflect"
 	"testing"
 
 	"github.com/julienschmidt/httprouter"
@@ -16,9 +15,26 @@ import (
 )
 
 func expect(t *testing.T, a interface{}, b interface{}) {
+	t.Helper()
 	if a != b {
-		t.Errorf("Expected [%v] (type %v) - Got [%v] (type %v)", b, reflect.TypeOf(b), a, reflect.TypeOf(a))
+		t.Errorf("Expected [%v] (type %T) - Got [%v] (type %T)", b, b, a, a)
 	}
+}
+
+func expectErr(t *testing.T, actual error, expected error) {
+	t.Helper()
+	if (actual == nil && expected == nil) || (actual != nil && expected != nil && actual.Error() == expected.Error()) {
+		return
+	}
+	t.Errorf("Expected error [%v] - Got error [%v]", expected, actual)
+}
+
+// Helper functions for building OU and CN validation errors
+func mkOUErr(clientOUs, serverOUs string) error {
+	return fmt.Errorf("cert failed OU validation for [%s], allowed: [%s]", clientOUs, serverOUs)
+}
+func mkCNErr(clientCN, serverCNs string) error {
+	return fmt.Errorf(`cert failed CN validation for "%s", allowed: [%s]`, clientCN, serverCNs)
 }
 
 type fakeCertData struct {
@@ -26,98 +42,92 @@ type fakeCertData struct {
 	cn string
 }
 
-// fakeCertChain will turn a [][]fakeCertData into a [][]*x509.Certificate which is the
+// fakeCertChain will turn a []fakeCertData into a [][]*x509.Certificate which is the
 // type found in the `http.Request.TLS.VerifiedChains` attribute.
-func fakeCertChain(certs [][]fakeCertData) [][]*x509.Certificate {
-	fakeCertChains := [][]*x509.Certificate{}
-
-	for _, certChainData := range certs {
-		chain := []*x509.Certificate{}
-		for _, certData := range certChainData {
-			cert := &x509.Certificate{
-				Subject: pkix.Name{
-					OrganizationalUnit: []string(certData.ou),
-					CommonName:         string(certData.cn),
-				},
-			}
-			chain = append(chain, cert)
+func fakeCertChain(certChainData ...fakeCertData) [][]*x509.Certificate {
+	chain := []*x509.Certificate{}
+	for _, certData := range certChainData {
+		cert := &x509.Certificate{
+			Subject: pkix.Name{
+				OrganizationalUnit: []string(certData.ou),
+				CommonName:         string(certData.cn),
+			},
 		}
-		fakeCertChains = append(fakeCertChains, chain)
+		chain = append(chain, cert)
 	}
-	return fakeCertChains
+	return [][]*x509.Certificate{chain}
 }
 
 func TestDirectlyValidateOU(t *testing.T) {
+	// Tests that OU validation works as expected
+	// This is similar to TestAuthValidateOU in authorization_test.go
+	// but operates one level up the stack.
 	tests := []struct {
-		AllowedOUs     []string
-		ActualOUs      []string
-		ShouldValidate bool
+		Name        string
+		AllowedOUs  []string
+		ActualOUs   []string
+		ExpectedErr error
 	}{
-		{[]string{"endpoint"}, []string{"endpoint"}, true},
-		{[]string{"endpoint"}, []string{"site"}, false},
-		{[]string{"endpoint"}, []string{""}, false},
-		{[]string{"endpoint", "titan"}, []string{"site"}, false},
-		{[]string{"endpoint", "titan"}, []string{"titan"}, true},
+		{"MatchingOU", []string{"endpoint"}, []string{"endpoint"}, nil},
+		{"MismatchOU", []string{"endpoint"}, []string{"site"}, mkOUErr("site", "endpoint")},
+		{"NilOU", []string{"endpoint"}, nil, mkOUErr("", "endpoint")},
+		{"EmptyStringOU", []string{"endpoint"}, []string{""}, mkOUErr("", "endpoint")},
+		{
+			"OUList1",
+			[]string{"endpoint", "titan"},
+			[]string{"site"},
+			mkOUErr("site", "endpoint titan"),
+		},
+		{"OUList2", []string{"endpoint", "titan"}, []string{"titan"}, nil},
+		{"OUList3", []string{"endpoint", "titan"}, []string{"endpoint"}, nil},
 	}
 
 	for _, tc := range tests {
-		fakeCertData := [][]fakeCertData{
-			[]fakeCertData{
+		t.Run(tc.Name, func(t2 *testing.T) {
+			cert := fakeCertChain(
 				fakeCertData{tc.ActualOUs, ""},
-			},
-		}
-		cert := fakeCertChain(fakeCertData)
-		auth := certauth.NewAuth(certauth.Options{
-			AllowedOUs: tc.AllowedOUs,
+			)
+			auth := certauth.NewAuth(certauth.Options{
+				AllowedOUs: tc.AllowedOUs,
+			})
+			_, err := auth.CheckAuthorization(cert[0][0], nil)
+
+			expectErr(t2, err, tc.ExpectedErr)
 		})
-		_, err := auth.CheckAuthorization(cert[0][0], nil)
-
-		if err != nil && tc.ShouldValidate {
-			t.Fatalf("Expected AllowedOUs (%v) and ActualOUs (%v) to pass validation, but it failed: err: %s", tc.AllowedOUs, tc.ActualOUs, err)
-		}
-
-		if err == nil && !tc.ShouldValidate {
-			t.Fatalf("Expected AllowedOUs (%v) and ActualOUs (%v) to failed validation, but it passed.", tc.AllowedOUs, tc.ActualOUs)
-		}
 	}
 }
 
 func TestDirectlyValidateCN(t *testing.T) {
+	// Tests that CN validation works as expected
+	// This is similar to TestAuthValidateCN in authorization_test.go
+	// but operates one level up the stack.
 	tests := []struct {
-		AllowedCNs     []string
-		ActualCN       string
-		ShouldValidate bool
+		Name        string
+		AllowedCNs  []string
+		ActualCN    string
+		ExpectedErr error
 	}{
-		{[]string{"foo.com"}, "foo.com", true},
-		{[]string{"foo.com"}, "bar.com", false},
-		{[]string{"foo.com"}, "", false},
+		{"NilServerCN", nil, "", nil},
+		{"EmptyServerCN", []string{}, "", nil},
+		{"MatchingCN", []string{"foo.com"}, "foo.com", nil},
+		{"MismatchCN", []string{"foo.com"}, "bar.com", mkCNErr("bar.com", "foo.com")},
+		{"EmptyClientCN", []string{"foo.com"}, "", mkCNErr("", "foo.com")},
 	}
 
 	for _, tc := range tests {
-		fakeCertData := [][]fakeCertData{
-			[]fakeCertData{
+		t.Run(tc.Name, func(t2 *testing.T) {
+			cert := fakeCertChain(
 				fakeCertData{[]string{""}, tc.ActualCN},
-			},
-		}
-		cert := fakeCertChain(fakeCertData)
-		auth := certauth.NewAuth(certauth.Options{
-			AllowedCNs: tc.AllowedCNs,
+			)
+			auth := certauth.NewAuth(certauth.Options{
+				AllowedCNs: tc.AllowedCNs,
+			})
+			_, err := auth.CheckAuthorization(cert[0][0], nil)
+
+			expectErr(t, err, tc.ExpectedErr)
 		})
-		_, err := auth.CheckAuthorization(cert[0][0], nil)
-
-		if err != nil && tc.ShouldValidate {
-			t.Fatalf("Expected AllowedCNs (%v) and ActualCN (%v) to pass validation, but it failed: err: %s", tc.AllowedCNs, tc.ActualCN, err)
-		}
-
-		if err == nil && !tc.ShouldValidate {
-			t.Fatalf("Expected AllowedCNs (%v) and ActualCN (%v) to failed validation, but it passed.", tc.AllowedCNs, tc.ActualCN)
-		}
 	}
 }
-
-var testHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-	w.Write([]byte("bar"))
-})
 
 func makeTestCNHandler(t *testing.T, name string) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -130,32 +140,18 @@ func makeTestCNHandler(t *testing.T, name string) http.HandlerFunc {
 	})
 }
 
-func makeTestCNRouterHandler(t *testing.T) httprouter.Handle {
-	return httprouter.Handle(func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-		param := ps.ByName("test_param")
-		val, ok := r.Context().Value(certauth.HasAuthorizedCN).(string)
-		if !ok {
-			t.Fatal("Context did not set context HasAuthorizedCN")
-		}
-		expect(t, val, param)
-		fmt.Fprintf(w, "%s", param)
-	})
-}
-
 func TestMiddleware(t *testing.T) {
-	allowedFakeCertData := [][]fakeCertData{
-		[]fakeCertData{
-			fakeCertData{[]string{"endpoint"}, "foo.com"},
-		},
-	}
-	allowedCert := fakeCertChain(allowedFakeCertData)
-	failedFakeCertData := [][]fakeCertData{
-		[]fakeCertData{
-			fakeCertData{[]string{"site"}, "foo.com"},
-			fakeCertData{[]string{"endpoint"}, "foo.com"},
-		},
-	}
-	failedCert := fakeCertChain(failedFakeCertData)
+	var testHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("bar"))
+	})
+
+	allowedCert := fakeCertChain(
+		fakeCertData{[]string{"endpoint"}, "foo.com"},
+	)
+	failedCert := fakeCertChain(
+		fakeCertData{[]string{"site"}, "foo.com"},
+		fakeCertData{[]string{"endpoint"}, "foo.com"},
+	)
 
 	auth := certauth.NewAuth(certauth.Options{
 		AllowedOUs: []string{"endpoint", "titan"},
@@ -190,22 +186,13 @@ func TestMiddleware(t *testing.T) {
 }
 
 func TestRouterMiddleware(t *testing.T) {
-	testRouterHandler := httprouter.Handle(func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-		fmt.Fprintf(w, "%s", ps.ByName("test_param"))
-	})
-	allowedFakeCertData := [][]fakeCertData{
-		[]fakeCertData{
-			fakeCertData{[]string{"endpoint"}, "foo.com"},
-		},
-	}
-	allowedCert := fakeCertChain(allowedFakeCertData)
-	failedFakeCertData := [][]fakeCertData{
-		[]fakeCertData{
-			fakeCertData{[]string{"site"}, "foo.com"},
-			fakeCertData{[]string{"endpoint"}, "foo.com"},
-		},
-	}
-	failedCert := fakeCertChain(failedFakeCertData)
+	allowedCert := fakeCertChain(
+		fakeCertData{[]string{"endpoint"}, "foo.com"},
+	)
+	failedCert := fakeCertChain(
+		fakeCertData{[]string{"site"}, "foo.com"},
+		fakeCertData{[]string{"endpoint"}, "foo.com"},
+	)
 
 	auth := certauth.NewAuth(certauth.Options{
 		AuthorizationCheckers: []certauth.AuthorizationChecker{
@@ -217,8 +204,22 @@ func TestRouterMiddleware(t *testing.T) {
 	url1 := fmt.Sprintf("https://foo.bar/foo/%s/bar", name_param)
 	url2 := fmt.Sprintf("https://foo.bar/test/%s/cn", "foo.com")
 	rtr := httprouter.New()
-	rtr.GET("/foo/:test_param/bar", auth.RouterHandler(testRouterHandler))
-	rtr.GET("/test/:test_param/cn", auth.RouterHandler(makeTestCNRouterHandler(t)))
+	rtr.GET("/foo/:test_param/bar", auth.RouterHandler(httprouter.Handle(
+		func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+			fmt.Fprintf(w, "%s", ps.ByName("test_param"))
+		},
+	)))
+	rtr.GET("/test/:test_param/cn", auth.RouterHandler(httprouter.Handle(
+		func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+			param := ps.ByName("test_param")
+			val, ok := r.Context().Value(certauth.HasAuthorizedCN).(string)
+			if !ok {
+				t.Fatal("Context did not set context HasAuthorizedCN")
+			}
+			expect(t, val, param)
+			fmt.Fprintf(w, "%s", param)
+		},
+	)))
 
 	// failed auth
 
