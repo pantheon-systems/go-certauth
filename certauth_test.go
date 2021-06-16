@@ -83,7 +83,7 @@ func TestDirectlyValidateOU(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		t.Run(tc.Name, func(t2 *testing.T) {
+		t.Run(tc.Name+"-legacy", func(t2 *testing.T) {
 			cert := fakeCertChain(
 				fakeCertData{tc.ActualOUs, ""},
 			)
@@ -92,7 +92,29 @@ func TestDirectlyValidateOU(t *testing.T) {
 			})
 			_, err := auth.CheckAuthorization(cert[0][0], nil)
 
-			expectErr(t2, err, tc.ExpectedErr)
+			expectErr(t, err, tc.ExpectedErr)
+		})
+		t.Run(tc.Name, func(t2 *testing.T) {
+			cert := fakeCertChain(
+				fakeCertData{tc.ActualOUs, ""},
+			)
+			auth := certauth.New(
+				certauth.WithCheckers(
+					certauth.AllowOUsandCNs(tc.AllowedOUs, []string{}),
+					certauth.AllowOUsandCNs(
+						[]string{"non-matching-ou"}, []string{"non-matching-cn"},
+					),
+				),
+				certauth.WithCheckers(
+					certauth.AllowOUsandCNs(tc.AllowedOUs, []string{}),
+					certauth.AllowOUsandCNs(
+						[]string{}, []string{},
+					),
+				),
+			)
+			_, err := auth.CheckAuthorization(cert[0][0], nil)
+
+			expectErr(t, err, tc.ExpectedErr)
 		})
 	}
 }
@@ -115,7 +137,7 @@ func TestDirectlyValidateCN(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		t.Run(tc.Name, func(t2 *testing.T) {
+		t.Run(tc.Name+"-legacy", func(t2 *testing.T) {
 			cert := fakeCertChain(
 				fakeCertData{[]string{""}, tc.ActualCN},
 			)
@@ -125,6 +147,28 @@ func TestDirectlyValidateCN(t *testing.T) {
 			_, err := auth.CheckAuthorization(cert[0][0], nil)
 
 			expectErr(t, err, tc.ExpectedErr)
+		})
+		t.Run(tc.Name, func(t2 *testing.T) {
+			cert := fakeCertChain(
+				fakeCertData{[]string{""}, tc.ActualCN},
+			)
+			auth := certauth.New(
+				certauth.WithCheckers(
+					certauth.AllowOUsandCNs(
+						[]string{"non-matching-ou"}, []string{"non-matching-cn"},
+					),
+					certauth.AllowOUsandCNs([]string{}, tc.AllowedCNs),
+				),
+				certauth.WithCheckers(
+					certauth.AllowOUsandCNs(
+						[]string{}, []string{},
+					),
+					certauth.AllowOUsandCNs([]string{}, tc.AllowedCNs),
+				),
+			)
+			_, err := auth.CheckAuthorization(cert[0][0], nil)
+
+			expectErr(t2, err, tc.ExpectedErr)
 		})
 	}
 }

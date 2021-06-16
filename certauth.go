@@ -37,6 +37,7 @@ const (
 //    	- OU:endpoint & CN:matches endpoint parram. (ygg knows what EP has that ID)
 //      - OU:site & CN:matches SiteID
 
+// **DEPRECATED** use New with AuthOptions instead
 // Options is the configuration for a Auth handler
 type Options struct {
 	// AllowedOUs is an exact string match against the Client Certs OU's
@@ -61,10 +62,46 @@ type Options struct {
 
 // Auth is an instance of the middleware
 type Auth struct {
-	opt            Options
-	authErrHandler http.Handler
+	opt          Options /* **DEPRECATED** */
+	checkers     [][]AuthorizationChecker
+	setHeaders   bool
+	errorHandler http.Handler
 }
 
+// AuthOption is a type of function for configuring an Auth
+type AuthOption func(*Auth)
+
+// WithCheckers configures an Auth with the given checkers so that the Auth will pass when all the
+// checkers in any WithCheckers AuthOption pass.
+func WithCheckers(checkers ...AuthorizationChecker) AuthOption {
+	return func(a *Auth) {
+		a.checkers = append(a.checkers, checkers)
+	}
+
+}
+
+func WithHeaders() AuthOption {
+	return func(a *Auth) {
+		a.setHeaders = true
+	}
+}
+
+func WithErrorHandler(handler http.Handler) AuthOption {
+	return func(a *Auth) {
+		a.errorHandler = handler
+	}
+
+}
+
+func New(opts ...AuthOption) *Auth {
+	a := &Auth{}
+	for _, opt := range opts {
+		opt(a)
+	}
+	return a
+}
+
+// **DEPRECATED** use New instead
 // NewAuth returns an auth
 func NewAuth(opts ...Options) *Auth {
 	o := Options{}
@@ -85,8 +122,8 @@ func NewAuth(opts ...Options) *Auth {
 	}
 
 	return &Auth{
-		opt:            o,
-		authErrHandler: http.HandlerFunc(h),
+		opt:          o,
+		errorHandler: http.HandlerFunc(h),
 	}
 }
 
@@ -145,7 +182,7 @@ func (a *Auth) ProcessWithParams(
 
 	ctxParams, err := a.CheckAuthorization(r.TLS.VerifiedChains[0][0], ps)
 	if err != nil {
-		a.authErrHandler.ServeHTTP(w, r)
+		a.errorHandler.ServeHTTP(w, r)
 		return nil, err
 	}
 
@@ -197,22 +234,30 @@ func (a *Auth) CheckAuthorization(
 		err    error
 	)
 
-	for _, ck := range a.opt.AuthorizationCheckers {
-		if ps == nil { // not using httprouter
-			params, err = ck.CheckAuthorization(ou, cn)
-		} else { // using httprouter
-			params, err = ck.CheckAuthorizationWithParams(ou, cn, ps)
-		}
-		if err != nil {
-			return nil, err
-		}
-
-		// Collect the context params from each AuthorizationChecker into one map
-		if params != nil {
-			for k, v := range params {
-				ctxParams[k] = v
+	if len(a.opt.AuthorizationCheckers) > 0 {
+		a.checkers = append(a.checkers, a.opt.AuthorizationCheckers)
+	}
+	for _, cks := range a.checkers { // trying all the groups of checkers
+		for _, ck := range cks { // each checker in a group
+			if ps == nil { // not using httprouter
+				params, err = ck.CheckAuthorization(ou, cn)
+			} else { // using httprouter
+				params, err = ck.CheckAuthorizationWithParams(ou, cn, ps)
+			}
+			if err != nil { // stop trying checkers in this group if one fails
+				break
+			}
+			// Collect the context params from each AuthorizationChecker into one map
+			if params != nil {
+				for k, v := range params {
+					ctxParams[k] = v
+				}
 			}
 		}
+		// non-nil when a group doesn't pass, so nil means a group passed, so we're done
+		if err == nil {
+			break
+		}
 	}
-	return ctxParams, nil
+	return ctxParams, err
 }
