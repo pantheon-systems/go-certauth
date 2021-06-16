@@ -94,7 +94,9 @@ func WithErrorHandler(handler http.Handler) AuthOption {
 }
 
 func New(opts ...AuthOption) *Auth {
-	a := &Auth{}
+	a := &Auth{
+		errorHandler: http.HandlerFunc(defaultAuthErrorHandler),
+	}
 	for _, opt := range opts {
 		opt(a)
 	}
