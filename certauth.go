@@ -238,9 +238,9 @@ func (a *Auth) CheckAuthorization(
 		err    error
 	)
 
-	checkers := a.checkers
+	checkers := append([][]AuthorizationChecker{}, a.checkers...)
 	if len(a.opt.AuthorizationCheckers) > 0 {
-		checkers = append(a.checkers, a.opt.AuthorizationCheckers)
+		checkers = append(checkers, a.opt.AuthorizationCheckers)
 	}
 	for _, cks := range checkers { // trying all the groups of checkers
 		for _, ck := range cks { // each checker in a group
