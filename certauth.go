@@ -128,6 +128,7 @@ func NewAuth(opts ...Options) *Auth {
 	return &Auth{
 		opt:          o,
 		errorHandler: http.HandlerFunc(h),
+		checkers:     [][]AuthorizationChecker{o.AuthorizationCheckers},
 	}
 }
 
@@ -237,12 +238,7 @@ func (a *Auth) CheckAuthorization(
 		params map[ContextKey]ContextValue
 		err    error
 	)
-
-	checkers := append([][]AuthorizationChecker{}, a.checkers...)
-	if len(a.opt.AuthorizationCheckers) > 0 {
-		checkers = append(checkers, a.opt.AuthorizationCheckers)
-	}
-	for _, cks := range checkers { // trying all the groups of checkers
+	for _, cks := range a.checkers { // trying all the groups of checkers
 		for _, ck := range cks { // each checker in a group
 			if ps == nil { // not using httprouter
 				params, err = ck.CheckAuthorization(ou, cn)
