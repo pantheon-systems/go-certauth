@@ -62,7 +62,8 @@ type Options struct {
 
 // Auth is an instance of the middleware
 type Auth struct {
-	opt          Options /* **DEPRECATED** */
+	opt Options // **DEPRECATED**
+	// lists of checkers: auth if any list passes, a list passes if all checkers in the list pass
 	checkers     [][]AuthorizationChecker
 	setHeaders   bool
 	errorHandler http.Handler
@@ -73,6 +74,7 @@ type AuthOption func(*Auth)
 
 // WithCheckers configures an Auth with the given checkers so that the Auth will pass when all the
 // checkers in any WithCheckers AuthOption pass.
+// eg: New(WithCheckers(A), WithCheckers(B,C)) will pass on `A || (B && C)`
 func WithCheckers(checkers ...AuthorizationChecker) AuthOption {
 	return func(a *Auth) {
 		a.checkers = append(a.checkers, checkers)
@@ -236,10 +238,11 @@ func (a *Auth) CheckAuthorization(
 		err    error
 	)
 
+	checkers := a.checkers
 	if len(a.opt.AuthorizationCheckers) > 0 {
-		a.checkers = append(a.checkers, a.opt.AuthorizationCheckers)
+		checkers = append(a.checkers, a.opt.AuthorizationCheckers)
 	}
-	for _, cks := range a.checkers { // trying all the groups of checkers
+	for _, cks := range checkers { // trying all the groups of checkers
 		for _, ck := range cks { // each checker in a group
 			if ps == nil { // not using httprouter
 				params, err = ck.CheckAuthorization(ou, cn)
