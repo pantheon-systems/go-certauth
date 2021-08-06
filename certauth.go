@@ -64,9 +64,10 @@ type Options struct {
 type Auth struct {
 	opt Options // **DEPRECATED**
 	// lists of checkers: auth if any list passes, a list passes if all checkers in the list pass
-	checkers     [][]AuthorizationChecker
-	setHeaders   bool
-	errorHandler http.Handler
+	checkers             [][]AuthorizationChecker
+	setHeaders           bool
+	errorHandler         http.Handler
+	allowUntrustedIssuer bool
 }
 
 // AuthOption is a type of function for configuring an Auth
@@ -93,6 +94,18 @@ func WithErrorHandler(handler http.Handler) AuthOption {
 		a.errorHandler = handler
 	}
 
+}
+
+// Allows the built-in client certificate issuer verification to be skipped.
+// Used well in combination with the corresponding server's TLS configuration,
+// especially the TLSConfig.ClientAuth property.
+// tls.RequireAnyClientCert works well in combination with this to allow untrusted certificates;
+// on the other hand tls.RequireAndVerifyClientCert may make this library's built-in verification
+// superfluous.
+func WithInsecureAllowUntrustedIssuer() AuthOption {
+	return func(a *Auth) {
+		a.allowUntrustedIssuer = true
+	}
 }
 
 func New(opts ...AuthOption) *Auth {
@@ -181,11 +194,17 @@ func (a *Auth) Process(w http.ResponseWriter, r *http.Request) (*http.Request, e
 func (a *Auth) ProcessWithParams(
 	w http.ResponseWriter, r *http.Request, ps httprouter.Params,
 ) (*http.Request, error) {
-	if err := a.ValidateRequest(r); err != nil {
-		return nil, err
+	var certToAuthorize *x509.Certificate
+	if a.allowUntrustedIssuer != true {
+		if err := a.ValidateRequest(r); err != nil {
+			return nil, err
+		}
+		certToAuthorize = r.TLS.VerifiedChains[0][0]
+	} else {
+		certToAuthorize = r.TLS.PeerCertificates[0]
 	}
 
-	ctxParams, err := a.CheckAuthorization(r.TLS.VerifiedChains[0][0], ps)
+	ctxParams, err := a.CheckAuthorization(certToAuthorize, ps)
 	if err != nil {
 		a.errorHandler.ServeHTTP(w, r)
 		return nil, err

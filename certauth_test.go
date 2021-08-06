@@ -227,6 +227,27 @@ func TestMiddleware(t *testing.T) {
 	auth.Handler(makeTestCNHandler(t, "foo.com")).ServeHTTP(w, req)
 	expect(t, w.Code, http.StatusOK)
 	expect(t, w.Body.String(), "foo.com")
+
+	// Authorization checks on a cert that is allowed to have an untrusted issuer.
+	untrustedIssuerAuth := certauth.New(certauth.WithCheckers(certauth.AllowSpecificOUandCNs{
+		OUs: []string{"endpoint"},
+		CNs: []string{"foo.com"},
+	}), certauth.WithInsecureAllowUntrustedIssuer(),
+	)
+	w = httptest.NewRecorder()
+	req.TLS.VerifiedChains = nil
+	req.TLS.PeerCertificates = allowedCert[0]
+	untrustedIssuerAuth.Handler(testHandler).ServeHTTP(w, req)
+	expect(t, w.Code, http.StatusOK)
+	expect(t, w.Body.String(), "bar")
+
+	w = httptest.NewRecorder()
+	req.TLS.VerifiedChains = nil
+	req.TLS.PeerCertificates = fakeCertChain(
+		fakeCertData{[]string{"no-good-ou"}, "foo.com"},
+	)[0]
+	untrustedIssuerAuth.Handler(testHandler).ServeHTTP(w, req)
+	expect(t, w.Code, http.StatusForbidden)
 }
 
 func TestRouterMiddleware(t *testing.T) {
