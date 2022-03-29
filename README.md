@@ -1,6 +1,8 @@
 certauth
 ========
 [![Go Report Card](https://goreportcard.com/badge/github.com/pantheon-systems/go-certauth)](https://goreportcard.com/report/github.com/pantheon-systems/go-certauth)
+[![Unsupported](https://img.shields.io/badge/Pantheon-Unsupported-yellow?logo=pantheon&color=FFDC28)](https://pantheon.io/docs/oss-support-levels#unsupported)
+
 
 This package provides TLS certificate based authentication middleware. Our goal is
 compatibility with `net/http`, `httprouter` and possibly other popular Go HTTP
