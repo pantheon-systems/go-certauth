@@ -1,3 +1,4 @@
+//go:build go1.8
 // +build go1.8
 
 package certutils
@@ -14,6 +15,8 @@ import (
 
 // TLSConfigLevel declares a TLS configuration level returned by the NewTLSConfig func
 type TLSConfigLevel int
+
+const RequireClientCertDefault bool = true
 
 // Based on https://blog.gopheracademy.com/advent-2016/exposing-go-on-the-internet/
 // and the Mozilla TLS recommendations: https://wiki.mozilla.org/Security/Server_Side_TLS
@@ -67,13 +70,18 @@ type TLSServerConfig struct {
 }
 
 // NewTLSServer sets up a Pantheon(TM) type of tls server that Requires and Verifies peer cert
-func NewTLSServer(config TLSServerConfig) *http.Server {
+func NewTLSServer(config TLSServerConfig, requireClientCert *bool) *http.Server {
+	if requireClientCert == nil {
+		requireClientCert := RequireClientCertDefault
+	}
 	// Setup our TLS config
 	tlsConfig := NewTLSConfig(config.TLSConfigLevel)
 
 	// By default this server will require client MTLS certs and verify cert validity against the config.CertPool CA bundle
-	tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
-	tlsConfig.ClientCAs = config.CertPool
+	if true == *requireClientCert {
+		tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+		tlsConfig.ClientCAs = config.CertPool
+	}
 
 	// Setup client authentication
 	server := &http.Server{
