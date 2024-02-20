@@ -5,10 +5,7 @@ version: 2.1
 executors:
   go-build:
     docker:
-      - image: quay.io/getpantheon/go-build:latest
-        auth:
-          username: $QUAY_USER
-          password: $QUAY_PASSWD
+      - image: docker.io/library/golang:1.21
 commands:
   # commands to persist and load CIRCLE_BUILD_NUM across jobs:
   save-build-num:
