@@ -1,0 +1,10 @@
+# Configuration file for CodeQL.
+
+paths-ignore:
+  - "devops/**"
+  - "docs/**"
+  - "**/tests/**"
+  - "test/**"
+  - "scripts/**"
+  - "**/__tests__/**"
+  - "**/__mock__/**"

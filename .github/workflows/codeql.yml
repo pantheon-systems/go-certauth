@@ -1,0 +1,50 @@
+name: "CodeQL"
+
+on:
+  push:
+    branches: ['master']
+  pull_request:
+    # The branches below must be a subset of the branches above
+    branches: [ '**' ]
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: [ ubuntu-latest ]
+    permissions:
+      packages: read
+      actions: read
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ['go']
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Configure git to use token
+      env:
+        GH_TOKEN: ${{ secrets.CODEQL_GOLANG_BUILD }}
+      run:
+        git config --global url."https://${GH_TOKEN}:x-oauth-basic@github.com/pantheon-systems/".insteadOf "https://github.com/pantheon-systems/"
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: ${{ matrix.language }}
+        config-file: ./.github/codeql/codeql-config.yml
+        queries: security-extended
+
+    - name: Autobuild
+      env:
+        GOPRIVATE: github.com/pantheon-systems
+      uses: github/codeql-action/autobuild@v3
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3
+      with:
+        category: "/language:${{matrix.language}}"
