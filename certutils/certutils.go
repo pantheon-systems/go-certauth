@@ -7,8 +7,8 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net/http"
+	"os"
 	"time"
 )
 
@@ -35,8 +35,6 @@ func NewTLSConfig(level TLSConfigLevel) *tls.Config {
 
 	switch level {
 	case TLSConfigIntermediate:
-		// Causes servers to use Go's default ciphersuite preferences, which are tuned to avoid attacks. Does nothing on clients.
-		c.PreferServerCipherSuites = true
 		// Only use curves which have assembly implementations
 		c.CurvePreferences = []tls.CurveID{
 			tls.CurveP256,
@@ -85,7 +83,6 @@ func NewTLSServer(config TLSServerConfig) *http.Server {
 		Addr:              fmt.Sprintf("%s:%d", config.BindAddress, config.Port),
 		Handler:           config.Router,
 	}
-	server.TLSConfig.BuildNameToCertificate()
 	return server
 }
 
@@ -108,7 +105,7 @@ func LoadKeyCertFiles(keyFile, certFile string) (tls.Certificate, error) {
 // and gives  you back a proper x509.CertPool for your fun and proffit
 func LoadCACertFile(cert string) (*x509.CertPool, error) {
 	// validate caCert, and setup certpool
-	ca, err := ioutil.ReadFile(cert)
+	ca, err := os.ReadFile(cert)
 	if err != nil {
 		return nil, fmt.Errorf("could not load CA Certificate: %s ", err.Error())
 	}
