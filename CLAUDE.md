@@ -51,5 +51,17 @@ Authorization results are propagated via request context keys (`HasAuthorizedOU`
 
 ## CI
 
-- **CircleCI** — Runs `make` (tests + build) with `golang:1.21`.
-- **GitHub Actions** — CodeQL security scanning on push to master and PRs.
+- **GitHub Actions** — Runs `make test` and `make build` on push to `main` and all PRs.
+- **GitHub Actions** — CodeQL security scanning on push to `main` and PRs.
+- **GitHub Actions** — GoReleaser creates a GitHub release when a semver tag (`v*.*.*`) is pushed. The workflow runs tests before releasing.
+
+## Releasing
+
+Push a signed semver tag to trigger a release:
+
+```bash
+git tag -s v0.1.0
+git push origin v0.1.0
+```
+
+GoReleaser skips binary builds (this is a library) and generates changelog notes automatically.
