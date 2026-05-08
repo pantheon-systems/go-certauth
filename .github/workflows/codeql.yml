@@ -33,7 +33,7 @@ jobs:
         git config --global url."https://${GH_TOKEN}:x-oauth-basic@github.com/pantheon-systems/".insteadOf "https://github.com/pantheon-systems/"
 
     - name: Initialize CodeQL
-      uses: github/codeql-action/init@v3
+      uses: github/codeql-action/init@v4
       with:
         languages: ${{ matrix.language }}
         config-file: ./.github/codeql/codeql-config.yml
@@ -42,9 +42,9 @@ jobs:
     - name: Autobuild
       env:
         GOPRIVATE: github.com/pantheon-systems
-      uses: github/codeql-action/autobuild@v3
+      uses: github/codeql-action/autobuild@v4
 
     - name: Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@v3
+      uses: github/codeql-action/analyze@v4
       with:
         category: "/language:${{matrix.language}}"
