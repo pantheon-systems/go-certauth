@@ -1,0 +1,13 @@
+# Managed by github-terraform — do not edit manually
+---
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: "go-certauth"
+  description: "Go handlers and middleware to do client cert authentication."
+  annotations:
+    "backstage.io/techdocs-ref": "dir:docs/"
+spec:
+  type: "unknown"
+  lifecycle: "experimental"
+  owner: "sig-go"
